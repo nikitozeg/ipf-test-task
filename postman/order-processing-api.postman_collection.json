@@ -1,0 +1,374 @@
+{
+  "info": {
+    "name": "Order Processing API (mock)",
+    "_postman_id": "a1b2c3d4-0001-4a00-9000-orderprocapi01",
+    "description": "Manual testing collection for the mock Order Processing API.\n\nUses two collection variables:\n- `baseUrl` (default http://localhost:3000)\n- `orderId` — auto-filled by `POST /orders` so the GET/PATCH requests work without copy-pasting.\n\nThe folder \"Constraint demos\" shows the three baked-in performance quirks:\n1. GET /orders ignores ?limit=\n2. POST /orders has an 80-120ms delay\n3. max 10 concurrent in-flight requests (see /metrics)",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:3000", "type": "string" },
+    { "key": "orderId", "value": "", "type": "string" },
+    { "key": "freshOrderId", "value": "", "type": "string" }
+  ],
+  "item": [
+    {
+      "name": "Health & metrics",
+      "item": [
+        {
+          "name": "GET /health",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{baseUrl}}/health", "host": ["{{baseUrl}}"], "path": ["health"] }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('status ok', () => pm.expect(pm.response.json().status).to.eql('ok'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /metrics",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{baseUrl}}/metrics", "host": ["{{baseUrl}}"], "path": ["metrics"] },
+            "description": "Shows the semaphore: inUse (capped at max=10) and waiting. Hit this while running a load tool against POST /orders to see the cap in action."
+          }
+        },
+        {
+          "name": "DELETE /technical/orders — wipe all (test only)",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/technical/orders",
+              "host": ["{{baseUrl}}"],
+              "path": ["technical", "orders"]
+            },
+            "description": "Test-only endpoint: removes every record so a perf run starts clean. Bypasses the concurrency limit. Returns { deleted: N }."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('reports deleted count', () => pm.expect(pm.response.json()).to.have.property('deleted'));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Orders (CRUD)",
+      "item": [
+        {
+          "name": "POST /orders — place order",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"buy_currency\": \"USD\",\n  \"sell_currency\": \"GBP\",\n  \"fixed_side\": \"buy\",\n  \"amount\": \"150.00\"\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/orders", "host": ["{{baseUrl}}"], "path": ["orders"] },
+            "description": "Creates a currency conversion (CurrencyCloud-style). Note the response time is ~80-120ms (constraint #2). Saves the new id into the `orderId` collection variable."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201 Created', () => pm.response.to.have.status(201));",
+                  "const o = pm.response.json();",
+                  "pm.test('has id', () => pm.expect(o.id).to.be.a('string').and.not.empty);",
+                  "pm.test('status is awaiting_funds', () => pm.expect(o.status).to.eql('awaiting_funds'));",
+                  "pm.test('currency_pair set', () => pm.expect(o.currency_pair).to.eql('GBPUSD'));",
+                  "pm.collectionVariables.set('orderId', o.id);",
+                  "console.log('Saved orderId =', o.id, '| response time:', pm.response.responseTime + 'ms');"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /orders/{id} — retrieve",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/orders/{{orderId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["orders", "{{orderId}}"]
+            },
+            "description": "Retrieves an order by id. A pre-request script creates a fresh order and stores its id in `orderId`, so this works standalone, in any order."
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Make this request self-contained: create a fresh order first.",
+                  "pm.sendRequest({",
+                  "  url: pm.collectionVariables.get('baseUrl') + '/orders',",
+                  "  method: 'POST',",
+                  "  header: { 'Content-Type': 'application/json' },",
+                  "  body: { mode: 'raw', raw: JSON.stringify({ buy_currency: 'USD', sell_currency: 'GBP', fixed_side: 'buy', amount: '150.00' }) }",
+                  "}, (err, res) => {",
+                  "  if (!err && res.code === 201) pm.collectionVariables.set('orderId', res.json().id);",
+                  "});"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('id matches', () => pm.expect(pm.response.json().id).to.eql(pm.collectionVariables.get('orderId')));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /orders — list (page & limit)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/orders?page=1&limit=10",
+              "host": ["{{baseUrl}}"],
+              "path": ["orders"],
+              "query": [
+                { "key": "page", "value": "1" },
+                { "key": "limit", "value": "10" }
+              ]
+            },
+            "description": "Lists orders. The response carries `requestedLimit`, `returned` and `total` — note `returned == total` regardless of `limit` (constraint #1)."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.test('returned equals total (limit ignored)', () => pm.expect(b.returned).to.eql(b.total));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "PATCH /orders/{id}/status — advance",
+          "request": {
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"status\": \"funds_arrived\"\n}" },
+            "url": {
+              "raw": "{{baseUrl}}/orders/{{orderId}}/status",
+              "host": ["{{baseUrl}}"],
+              "path": ["orders", "{{orderId}}", "status"]
+            },
+            "description": "Advances status awaiting_funds -> funds_arrived. A pre-request script creates a fresh awaiting_funds order, so this works standalone and can be re-run without hitting a 409."
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Create a fresh awaiting_funds order so the transition always succeeds.",
+                  "pm.sendRequest({",
+                  "  url: pm.collectionVariables.get('baseUrl') + '/orders',",
+                  "  method: 'POST',",
+                  "  header: { 'Content-Type': 'application/json' },",
+                  "  body: { mode: 'raw', raw: JSON.stringify({ buy_currency: 'USD', sell_currency: 'GBP', fixed_side: 'buy', amount: '150.00' }) }",
+                  "}, (err, res) => {",
+                  "  if (!err && res.code === 201) pm.collectionVariables.set('orderId', res.json().id);",
+                  "});"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('status updated', () => pm.expect(pm.response.json().status).to.eql('funds_arrived'));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Constraint demos",
+      "item": [
+        {
+          "name": "GET /orders?limit=1 — limit is ignored (#1)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/orders?page=1&limit=1",
+              "host": ["{{baseUrl}}"],
+              "path": ["orders"],
+              "query": [
+                { "key": "page", "value": "1" },
+                { "key": "limit", "value": "1" }
+              ]
+            },
+            "description": "Even with limit=1, the server returns every record. Create several orders first, then run this."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const b = pm.response.json();",
+                  "pm.test('requestedLimit is 1', () => pm.expect(b.requestedLimit).to.eql(1));",
+                  "pm.test('but returned > 1 when >1 order exists', () => pm.expect(b.returned).to.eql(b.total));",
+                  "console.log('requestedLimit=1, returned=' + b.returned + ' (limit not enforced)');"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /orders — observe 80-120ms delay (#2)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{}" },
+            "url": { "raw": "{{baseUrl}}/orders", "host": ["{{baseUrl}}"], "path": ["orders"] },
+            "description": "Watch the response time in Postman — it should sit between ~80 and ~120ms."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201 Created', () => pm.response.to.have.status(201));",
+                  "pm.test('response time >= 75ms (simulated delay)', () => pm.expect(pm.response.responseTime).to.be.above(75));",
+                  "console.log('responseTime =', pm.response.responseTime + 'ms');"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /orders/{missing} — 404",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/orders/does-not-exist",
+              "host": ["{{baseUrl}}"],
+              "path": ["orders", "does-not-exist"]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('404 Not Found', () => pm.response.to.have.status(404));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "PATCH invalid transition — 409",
+          "request": {
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"status\": \"completed\"\n}" },
+            "url": {
+              "raw": "{{baseUrl}}/orders/{{freshOrderId}}/status",
+              "host": ["{{baseUrl}}"],
+              "path": ["orders", "{{freshOrderId}}", "status"]
+            },
+            "description": "Tries awaiting_funds -> completed (skipping funds_arrived). The pre-request script creates a brand-new awaiting_funds order so this works no matter what else you ran before. Returns 409 with allowedNext."
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Create a fresh pending order so the transition demo is order-independent.",
+                  "pm.sendRequest({",
+                  "  url: pm.collectionVariables.get('baseUrl') + '/orders',",
+                  "  method: 'POST',",
+                  "  header: { 'Content-Type': 'application/json' },",
+                  "  body: { mode: 'raw', raw: '{}' }",
+                  "}, (err, res) => {",
+                  "  if (!err) pm.collectionVariables.set('freshOrderId', res.json().id);",
+                  "});"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('409 Conflict', () => pm.response.to.have.status(409));",
+                  "pm.test('error is invalid_transition', () => pm.expect(pm.response.json().error).to.eql('invalid_transition'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "PATCH unknown status — 400",
+          "request": {
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"status\": \"teleported\"\n}" },
+            "url": {
+              "raw": "{{baseUrl}}/orders/{{orderId}}/status",
+              "host": ["{{baseUrl}}"],
+              "path": ["orders", "{{orderId}}", "status"]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('400 Bad Request', () => pm.response.to.have.status(400));",
+                  "pm.test('error is invalid_status', () => pm.expect(pm.response.json().error).to.eql('invalid_status'));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,34 @@
+services:
+  api:
+    build: .
+    image: order-processing-api:latest
+    container_name: order-processing-api
+    ports:
+      - "3000:3000"
+    environment:
+      PORT: 3000
+      MAX_CONCURRENCY: 10
+      POST_DELAY_MIN_MS: 80
+      POST_DELAY_MAX_MS: 120
+      MAX_QUEUE: 0
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://127.0.0.1:3000/health',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+    restart: unless-stopped
+
+  # Containerised test runner. Doesn't start by default (it's in the "test"
+  # profile). Run a test end-to-end against the api container with:
+  #   docker compose --profile test run --rm k6 run /scripts/load.js
+  #   docker compose --profile test run --rm k6 run /scripts/benchmark.js
+  k6:
+    build: ./k6
+    image: order-api-k6:latest
+    environment:
+      BASE_URL: http://api:3000
+    depends_on:
+      api:
+        condition: service_healthy
+    profiles: ["test"]
