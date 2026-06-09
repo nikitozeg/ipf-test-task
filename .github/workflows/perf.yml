@@ -1,0 +1,38 @@
+name: performance
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Start the API
+        run: |
+          node src/server.js &
+          for i in $(seq 1 30); do curl -sf localhost:3000/health && break; sleep 0.5; done
+
+      - name: Install k6
+        uses: grafana/setup-k6-action@v1
+
+      - name: Benchmark (k6 thresholds gate the build)
+        run: |
+          K6_WEB_DASHBOARD=true \
+          K6_WEB_DASHBOARD_EXPORT=benchmark-report.html \
+          K6_WEB_DASHBOARD_PERIOD=1s \
+          k6 run --vus 10 --duration 20s k6/benchmark.js
+
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-report
+          path: benchmark-report.html
