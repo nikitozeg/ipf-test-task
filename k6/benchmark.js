@@ -18,8 +18,7 @@ export const options = {
     // create
     'http_req_duration{endpoint:create}': ['p(95)<250', 'p(99)<400'],
     'http_req_failed{endpoint:create}': ['rate<0.01'],
-    'http_reqs{endpoint:create}': ['rate>80'],
-    'http_reqs{endpoint:create}': ['rate<150'],
+    'http_reqs{endpoint:create}': ['rate>80', 'rate<150'],
     //get_by_id
     'http_req_duration{endpoint:get_by_id}': ['p(95)<150'],
     'http_req_failed{endpoint:get_by_id}': ['rate<0.01'],

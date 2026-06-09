@@ -96,3 +96,33 @@ k6/                 perf tests - benchmark, load, stress)
 infra/terraform/    AWS ECS Fargate
 postman/            manual collection
 ```
+
+
+## Conclusion
+
+**Benchmark test**
+
+POST /orders tops out at ~98 req/s. The limit is concurrency(10) x delay(0.1s), not CPU, so adding more users does not help, they just queue.
+GET /orders/{id} is fast (~1ms p95), basically free, the healthy endpoint we compare against.
+
+**Benchmark-list test**
+
+GET /orders is O(n) in dataset size,
+p(95) grows linearly on data size, (~8 → ~17 → ~75 ms across 200/500/2000 records)
+throuphut collapsed inversly
+
+**Load test**
+
+At 50 req/s with a realistic mix all SLOs pass, 0% errors, latency flat (create ~120ms, reads 1-2ms, list ~14ms), only ~2 VUs needed.
+But it passes because load is low and data is small (200 records), so a green load test does not prove production is fine, the O(n) GET /orders problem only shows with more data.
+
+**Stress tes**
+
+The server tops out at about 266 req/s. After that it can't go faster.
+
+Response time blows up from ~100ms to about 4.5 seconds. Even the fast get-by-id gets slow, because everything waits in the same queue
+.
+k6 kept adding virtual users to hold the rate, until it hit the limit (1000 VUs). After that, throughput started going downю
+
+About 105k requests were dropped — k6 couldn't keep up.
+Almost no errors (~0.06%). The server didn't crash, it just got really slow. So only the latency check caught it , the error-rate check stayed green.
