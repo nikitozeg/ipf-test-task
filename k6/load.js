@@ -13,7 +13,7 @@ export const options = {
       maxVUs: 200,
       stages: [
         { duration: '1m', target: 50 }, // ramp to 50 req/s
-        { duration: '3m', target: 50 }, // hold (realistic peak?)
+        { duration: '3m', target: 200 }, // hold (realistic peak)
         { duration: '1m', target: 0 },  // ramp down
       ],
     },

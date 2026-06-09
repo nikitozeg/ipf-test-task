@@ -25,8 +25,11 @@ export const options = {
   },
   thresholds: {
     // expected break:
-    'http_req_failed': [{ threshold: 'rate<0.05', abortOnFail: true, delayAbortEval: '30s' }],
-    'http_req_duration{endpoint:get_by_id}': ['p(95)<50'],
+      'http_req_failed': [{ threshold: 'rate<0.05', abortOnFail: true, delayAbortEval: '30s' }],
+      'http_req_duration{endpoint:get_by_id}': ['p(95)<50'],
+      'http_req_duration{endpoint:create}': ['p(95)<3000'],
+      'http_req_duration{endpoint:list}':    ['p(95)<5000'],
+      'http_req_duration{endpoint:patch}':   ['p(95)<3000'],
   },
 };
 
