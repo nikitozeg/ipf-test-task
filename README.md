@@ -80,8 +80,11 @@ both.
   almost no errors. So only a latency SLO catches it, an error-rate SLO stays green.
 
 ## Fixes / what i would do with more time
+
 1 add real pagination to GET /orders (O(n) becomes constant)
+
 2raise the concurrency limit and/or make the delay async to get more POST throughput
+
 3 add load error (503) so overload fails fast instead of just getting slow
 
 ## CI
